@@ -1,7 +1,7 @@
 register_keys:
   # if off, allow connection even if usb connection is below usb 3.0
   # ATTENTION: usb 3.0 is always recommended, as advance functionality like SLAM mode requires usb 3.0 for reliable map file transfer
-  strict_usb3.0_check: 0  # 0: off: 1: on;
+  strict_usb3.0_check: 1  # 0: off: 1: on;
 
   # 0: use odin internal system time as data time stamp, typical and recommended;
   # 1: use host ros time (upon receive) as data time stamp, only use if you specifically require this setup, not recommended for most users
@@ -83,11 +83,11 @@ register_keys:
   rgb_fps: 100        # Frame rate * 10 (300 = 30fps, 145 = 14.5fps) / 帧率×10
 
   # slam cloud data
-  sendcloudslam: 1        # 0: off; 1: on
+  sendcloudslam: 0        # 0: off; 1: on
 
   # processed with raw point cloud, rgb image, and calib.yaml from device
   # Processed on host device
-  sendcloudrender: 1      # 0: off; 1: on
+  sendcloudrender: 0      # 0: off; 1: on
 
   # depth completion demo, high computing resource usage. 
   # for more information please refer to the readme file.
@@ -122,7 +122,7 @@ register_keys:
   showpath: 0             # 0: off; 1: on
   showcamerapose: 0       # 0: off; 1: on
   
-  custom_map_mode: 1      # 0: Odometry mode 1: SLAM mode 2: Relocalization mode
+  custom_map_mode: 0      # 0: Odometry mode 1: SLAM mode 2: Relocalization mode
   custom_init_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
   custom_init_pose_search_radius: 4.0 # max position offset in meters, recommended <= 10
   custom_init_pose_max_rot_deg: 180.0 # max rotation offset in degrees, up to 180
