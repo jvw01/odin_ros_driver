@@ -106,6 +106,38 @@ static std::shared_ptr<rawCloudRender> g_renderer = nullptr;
 std::string calib_file_ = "";
 static std::shared_ptr<odin_ros_driver::YamlParser> g_parser = nullptr;
 
+// Latency log: with ODIN_TIMING_LOG set to a file, each image, cloud and odometry message's
+// stamp (host-aligned), the time the SDK hands it to the driver and the time the driver has
+// published it, in host nanoseconds, with the callback thread.
+static std::mutex g_timing_mutex;
+static FILE* g_timing_file = nullptr;
+static bool g_timing_checked = false;
+
+static int64_t host_now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+static void timing_log(const char* kind, uint64_t stamp_ns, int64_t entry_ns, int64_t exit_ns) {
+    std::lock_guard<std::mutex> lock(g_timing_mutex);
+    if (!g_timing_checked) {
+        g_timing_checked = true;
+        const char* path = std::getenv("ODIN_TIMING_LOG");
+        if (path != nullptr && path[0] != '\0') {
+            g_timing_file = std::fopen(path, "w");
+            if (g_timing_file) {
+                std::fprintf(g_timing_file, "kind,stamp_ns,entry_ns,exit_ns,thread\n");
+            }
+        }
+    }
+    if (g_timing_file) {
+        std::fprintf(g_timing_file, "%s,%llu,%lld,%lld,%lu\n", kind,
+                     static_cast<unsigned long long>(stamp_ns), static_cast<long long>(entry_ns),
+                     static_cast<long long>(exit_ns), static_cast<unsigned long>(pthread_self()));
+        std::fflush(g_timing_file);
+    }
+}
+
 static constexpr size_t PTP_SMOOTH_WINDOW_SIZE = 300;
 static std::mutex g_ptp_mutex;
 static std::deque<double> g_ptp_delay_buf;
@@ -1032,12 +1064,15 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
         case LIDAR_DT_NONE:
             printf("empty lidar data type: %x\n", data->type);
             break;
-        case LIDAR_DT_RAW_RGB:
+        case LIDAR_DT_RAW_RGB: {
+            const int64_t entry_ns = host_now_ns();
             if (g_sendrgb) {
                 g_ros_object->publishRgb((capture_Image_List_t *)&data->stream);
             }
+            timing_log("rgb", aligned_stamp_ns(data->stream.imageList[0].timestamp), entry_ns, host_now_ns());
             update_count(&rgb_rx_fps);
             break;
+        }
         case LIDAR_DT_RAW_IMU:
             if (g_sendimu) {
                 imudata = (imu_convert_data_t *)data->stream.imageList[0].pAddr;
@@ -1053,27 +1088,36 @@ static void lidar_data_callback(const lidar_data_t *data, void *user_data)
             }
             update_count(&imu_rx_fps);
             break;
-        case LIDAR_DT_RAW_DTOF:
+        case LIDAR_DT_RAW_DTOF: {
+            const int64_t entry_ns = host_now_ns();
             if (g_senddtof ) {
                 g_ros_object->publishIntensityCloud((capture_Image_List_t *)&data->stream, 1);
             }
             if (g_pub_intensity_gray) {
                 g_ros_object->publishGrayUInt8((capture_Image_List_t *)&data->stream, 2);
             }
+            timing_log("cloud", aligned_stamp_ns(data->stream.imageList[1].timestamp), entry_ns, host_now_ns());
             update_count(&dtof_rx_fps);
             break;
+        }
         case LIDAR_DT_SLAM_CLOUD:
             if (g_sendcloudslam) {
                 g_ros_object->publishPC2XYZRGBA((capture_Image_List_t *)&data->stream, 0);
             }
             update_count(&slam_cloud_rx_fps);
             break;
-        case LIDAR_DT_SLAM_ODOMETRY:
+        case LIDAR_DT_SLAM_ODOMETRY: {
+            const int64_t entry_ns = host_now_ns();
             if (g_sendodom) {
                 g_ros_object->publishOdometry((capture_Image_List_t *)&data->stream, OdometryType::STANDARD, g_show_path, g_show_camerapose);
             }
+            if (data->stream.imageList[0].length == sizeof(ros_odom_convert_complete_t)) {
+                const auto* odom_data = static_cast<const ros_odom_convert_complete_t*>(data->stream.imageList[0].pAddr);
+                timing_log("odometry", aligned_stamp_ns(odom_data->timestamp_ns), entry_ns, host_now_ns());
+            }
             update_count(&slam_odom_rx_fps);
             break;
+        }
         case LIDAR_DT_DEV_STATUS:
             dev_info_data = (lidar_device_status_t *)data->stream.imageList[0].pAddr;
 

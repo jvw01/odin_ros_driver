@@ -804,6 +804,24 @@ void publishGrayUInt8(capture_Image_List_t *stream, int idx) {
 void publishRgb(capture_Image_List_t *stream) {
     buffer_List_t &image = stream->imageList[0];
 
+    #ifdef ROS2
+    // The device's bytes (JPEG or NV12) go out before any decoding: decoding and publishing the
+    // bgr8 image take about 50 ms, all data types share the SDK's callback thread.
+    {
+        sensor_msgs::msg::CompressedImage compressed_msg;
+        compressed_msg.header.stamp = make_aligned_stamp(image.timestamp, node_);
+        compressed_msg.format = (image.format == LIDAR_RGB_FMT_NV12) ? "nv12" : "jpeg";
+        const uint8_t* bytes = static_cast<const uint8_t*>(image.pAddr);
+        compressed_msg.data.assign(bytes, bytes + image.length);
+        compressed_rgb_pub_->publish(compressed_msg);
+    }
+    // Decoded only for what needs the pixels.
+    if (rgb_pub_->get_subscription_count() == 0 && !m_undistort_map_init_success &&
+        !g_sendcloudrender && !data_logger_) {
+        return;
+    }
+    #endif
+
     cv::Mat decoded_image;
     std::vector<uint8_t> raw_data;
 
@@ -889,17 +907,7 @@ void publishRgb(capture_Image_List_t *stream) {
         if (m_undistort_map_init_success) {
             undistort_rgb_pub_->publish(*cv_undistorted_image.toImageMsg());
         }
-
-        // Compressed image: MJPEG uses original JPEG data; NV12 publishes raw NV12 bytes
-        sensor_msgs::msg::CompressedImage compressed_msg;
-        compressed_msg.header.stamp = make_aligned_stamp(stream->imageList[0].timestamp, node_);
-        if (image.format == LIDAR_RGB_FMT_NV12) {
-            compressed_msg.format = "nv12";
-        } else {
-            compressed_msg.format = "jpeg";
-        }
-        compressed_msg.data = raw_data;
-        compressed_rgb_pub_->publish(compressed_msg);
+        // The compressed image went out at the start.
     }
     #else
     {
